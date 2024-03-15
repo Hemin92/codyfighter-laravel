@@ -14,8 +14,8 @@ class CodyBot implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public $game;
-    public $strategy;
-
+    public $strategy = 'ryo';
+    public $y = 0;
     /**
      * Create a new job instance.
      */
@@ -77,11 +77,194 @@ class CodyBot implements ShouldQueue
     }
 
     public function makeMove() {
-        $move = $this->getRandomMove();
-        
         if ($this->game['players']['bearer']['is_player_turn']) {
+            $move = $this->getRandomMove();
+            
+            $ryo = $this->findSpecialAgent(1);
+            $ripper = $this->findSpecialAgent(4);
+            $buzz = $this->findSpecialAgent(5);
+
+            $exit = $this->getClosestExit();
+
+            $opponentClass = isset($this->game['players']['opponent']['codyfighter']['class']) ? $this->game['players']['opponent']['codyfighter']['class'] : null;
+
+            $isHunter = $opponentClass == "HUNTER";
+
+            $isHunterNearby = $this->isNearby(
+                $this->game['players']['bearer']['position'],
+                $this->game['players']['opponent']['position'],
+                2
+            );
+
+            $isRipperNearby = $this->isNearby(
+                $this->game['players']['bearer']['position'],
+                $ripper['position'] ?? null,
+                3
+            );
+
+            if ($ripper && $isRipperNearby) {
+                $this->strategy = 'ripper';
+                $move = $this->getFarthestDistanceMove(
+                    $ripper['position']
+                );
+
+                $this->move($move['x'], $move['y']);
+
+                error_log("CBot_0 - Avoiding Ripper");
+                return;
+            }
+
+            if ($ryo && $buzz) {
+                $this->strategy = 'ryo';
+                $move = $this->getShortestDistanceMove(
+                    array($ryo['position'])
+                );
+
+                $this->move($move['x'], $move['y']);
+                error_log("CBot_0 - Seeking Ryo");
+                return;
+            }
+
+            if (!$isHunter) {
+                $this->strategy = 'hunter';
+                $move = $this->getShortestDistanceMove(
+                    array($this->game['players']['opponent']['position'])
+                );
+
+                $this->move($move['x'], $move['y']);
+                error_log("CBot_0 - Chasing opponent");
+                return;
+            }
+
+            if ($exit) {
+                $this->strategy = 'exit';
+                $move = $this->getShortestDistanceMove(array($exit));
+                $this->move($move['x'], $move['y']);
+                error_log("CBot_0 - Finding Exit");
+                return;
+            }
+
+            $this->strategy = "stay";
+
+            $move = $this->getShortestDistanceMove(
+                array($this->game['players']['bearer']['position']),
+            );
+
             $this->move($move['x'], $move['y']);
+            return;
         }
+    }
+
+    public function getShortestDistanceMove($targets) {
+        $distances = array();
+        
+        $pits = $this->findPits();
+        
+        $possibleMoves = array_filter($this->game['players']['bearer']['possible_moves'], function ($position) use ($pits) {
+            if ($position['direction'] == 'stay') {
+                return true;
+            }
+
+            foreach ($pits as $pit) {
+                if ($position['x'] == $pit['x'] && $position['y'] == $pit['y']) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+        
+        foreach ($targets as $position) {
+            foreach ($possibleMoves as $possibleMove) {
+                $distance = $this->distance($possibleMove['x'], $possibleMove['y'], $position['x'], $position['y']);
+                $distances[] = ['move' => $possibleMove, 'distance' => $distance];
+            }
+        }
+
+        usort($distances, function ($a, $b) {
+            return $a['distance'] - $b['distance'];
+        });
+        
+
+        if ($this->isStaying($distances[0]['move'])) {
+          return $this->getRandomMove();
+        }
+    
+        return $distances[0]['move'];
+    }
+
+    public function isStaying($move) {
+        if (isset($this->game['players']['bearer']['possible_moves'][0])) {
+            return (
+                $move['x'] === $this->game['players']['bearer']['possible_moves'][0]['x'] &&
+                $move['y'] === $this->game['players']['bearer']['possible_moves'][0]['y']
+              );
+        }
+
+        return false;
+        
+    }
+
+    public function getFarthestDistanceMove($position) {
+        $longestDistance = 0;
+        $move = null;
+    
+        $pits = $this->findPits();
+    
+        $possibleMoves = array_filter($this->game['players']['bearer']['possible_moves'], function ($position) use ($pits) {
+            if ($position['direction'] == 'stay') {
+                return true;
+            }
+
+            foreach ($pits as $pit) {
+                if ($position['x'] == $pit['x'] && $position['y'] == $pit['y']) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+
+        foreach ($possibleMoves as $possibleMove) {
+            $distance = $this->distance($possibleMove['x'], $possibleMove['y'], $position['x'], $position['y']);
+            if ($distance > $longestDistance) {
+                $longestDistance = $distance;
+                $move = $possibleMove;
+            }
+        }
+
+        return $move;
+      }
+
+    public function isNearby($position, $specialAgentPosition, $distance = 1) {
+        return (
+          $this->distance(
+            $position['x'] ?? null,
+            $position['y'] ?? null,
+            $specialAgentPosition['x'] ?? null,
+            $specialAgentPosition['y'] ?? null,
+          ) <= $distance
+        );
+    }
+    public function getTargetPosition($possibleTargets, $target, $towards = true) {
+        $distances = array();
+    
+        foreach ($possibleTargets as $position) {
+            $distance = $this->distance($position['x'], $position['y'], $target['x'], $target['y']);
+            $distances[] = ['position' => $position, 'distance' => $distance];
+
+            if ($towards) {
+                usort($distances, function ($a, $b) {
+                    return $a['distance'] - $b['distance'];
+                });
+            } else {
+                usort($distances, function ($a, $b) {
+                    return $b['distance'] - $a['distance'];
+                });
+            }
+        }
+
+        return $distances[0]['position'] ?? null;
     }
 
     public function castSkills() {
@@ -100,7 +283,7 @@ class CodyBot implements ShouldQueue
             $ripperPos = isset($this->findSpecialAgent(4)['position']) ? $this->findSpecialAgent(4)['position'] : null;
             $opponentPos = $this->game['players']['opponent']['position'];
             $pitHoles = $this->findPits();
-            $possibleTargets = array_filter($skill['possible_targets'], function ($target) {
+            $possibleTargets = array_filter($skill['possible_targets'], function ($target) use ($skill, $opponentPos, $pitHoles) {
                 if ($skill['id'] == 1) {
                     foreach ($pitHoles as $hole) {
                         if ($hole['x'] == $target['x'] && $hole['y'] == $target['y']) {
@@ -148,34 +331,47 @@ class CodyBot implements ShouldQueue
 
             if ($target == null) continue;
 
-            if ()
+            foreach ($skill['possible_targets'] as $possibleTarget) {
+                if ($possibleTarget['x'] == $target['x'] && $possibleTarget['y'] == $target['y']) {
+                    $this->cast($skill['id'], $target['x'], $target['y']);
+                    $skillName = $skill['name'];
+                    $skillId = $skill['id'];
+                    error_log(
+                        "CBot_0 - ⚡️ Casting {$skillName} - id: {$skillId}"
+                      );
+                    break;
+                }
+            }
+
+            $this->castSkills();
+            break;
         }
     }
 
     public function findPits() {
         $map = $this->game['map'];
-        $y = 0;
 
+        $this->y = 0;
         return array_reduce($map, function ($pits, $row) {
             foreach ($row as $x => $tile) {
                 if ($tile['type'] == 12) {
-                    $pits[] = ['x' => $x, 'y' => $y];
+                    $pits[] = ['x' => $x, 'y' => $this->y];
                 }
             }
-            $y ++;
+            $this->y = $this->y + 1;
             return $pits;
         }, array());    
     }
     public function findExits() {
         $map = $this->game['map'];
-        $y = 0;
+        $this->y = 0;
         return array_reduce($map, function ($exits, $row) {
             foreach ($row as $x => $tile) {
                 if ($tile['type'] == 2) {
-                    $exits[] = ['x' => $x, 'y' => $y];
+                    $exits[] = ['x' => $x, 'y' => $this->y];
                 }
             }
-            $y ++;
+            $this->y = $this->y + 1;
             return $exits;
         }, array());    
     }
@@ -196,10 +392,10 @@ class CodyBot implements ShouldQueue
         foreach ($exits as $exit) {
             $distance = $this->distance($this->game['players']['bearer']['position']['x'], $this->game['players']['bearer']['position']['y'], $exit['x'], $exit['y']);
 
-            $distances[] = $distance;
+            $distances[] = ['exit' => $exit, 'distance' => $distance];
         }
         
-        $distances = usort($distances, function ($a, $b) {
+        usort($distances, function ($a, $b) {
             return $a['distance'] - $b['distance'];
         });
 
@@ -221,6 +417,27 @@ class CodyBot implements ShouldQueue
         $this->initGame();
         $this->waitForOpponent();
         $this->playGame();
+
+        $this->endGame();
+    }
+
+    public function endGame() {
+        if ($this->game['state']['status'] == 2) {
+            $player = $this->game['players']['bearer']['name'];
+            $opponent = $this->game['players']['opponent']['name'];
+            $verdict = 'draw';
+            switch ($this->game['verdict'])
+            {
+                case $opponent:
+                    $verdict = 'lost';
+                    break;
+                case $player: 
+                    $verdict = 'win';
+                    break;
+            };
+
+            error_log("CBot_0 {$player} game ended! {$verdict}");
+        }
     }
 
     /**
