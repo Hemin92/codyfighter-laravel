@@ -14,6 +14,7 @@ class CodyBot implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public $game;
+    public $strategy;
 
     /**
      * Create a new job instance.
@@ -94,15 +95,120 @@ class CodyBot implements ShouldQueue
             if ($skill['status'] !== 1 || count($skill['possible_targets']) ==0 || !$hasEnoughEnergy) 
                 continue;
 
-            $target = $this->getRandomTarget($skill['possible_targets']);
+            $exitPos = $this->getClosestExit();
+            $ryoPos = isset($this->findSpecialAgent(1)['position']) ? $this->findSpecialAgent(1)['position'] : null;
+            $ripperPos = isset($this->findSpecialAgent(4)['position']) ? $this->findSpecialAgent(4)['position'] : null;
+            $opponentPos = $this->game['players']['opponent']['position'];
+            $pitHoles = $this->findPits();
+            $possibleTargets = array_filter($skill['possible_targets'], function ($target) {
+                if ($skill['id'] == 1) {
+                    foreach ($pitHoles as $hole) {
+                        if ($hole['x'] == $target['x'] && $hole['y'] == $target['y']) {
+                            return true;
+                        }
+                    }
+                }
 
-            $this->cast($skill['id'], $target['x'], $target['y']);
+                if ($skill['damage']) {
+                    return $target['x'] == $opponentPos['x'] && $target['y'] == $opponentPos['y'];
+                }
 
-            $this->castSkills();
-            break;
+                foreach ($pitHoles as $hole) {
+                    if ($hole['x'] == $target['x'] && $hole['y'] == $target['y']) {
+                        return false;
+                    }
+                }
+            });
+
+            if (count($possibleTargets) == 0) continue;
+
+            $bestTarget = null;
+            switch ($this->strategy) {
+                case "exit":
+                    $bestTarget = $this->getTargetPosition($possibleTargets, $exitPos);
+                    break;
+                case "ryo":
+                    $bestTarget = $this->getTargetPosition($possibleTargets, $ryoPos);
+                    break;
+                
+                case "ripper":
+                    $bestTarget = $this->getTargetPosition($possibleTargets, $ripperPos, false);    
+                    break;
+
+                case "hunter":
+                    $bestTarget = $this->getTargetPosition($possibleTargets, $opponentPos, true);    
+                    break;
+                case "stay":
+                    $bestTarget = null;   
+                    break;
+              
+            }
+        }
+    }
+
+    public function findPits() {
+        $map = $this->game['map'];
+        $y = 0;
+
+        return array_reduce($map, function ($pits, $row) {
+            foreach ($row as $x => $tile) {
+                if ($tile['type'] == 12) {
+                    $pits[] = ['x' => $x, 'y' => $y];
+                }
+            }
+            $y ++;
+            return $pits;
+        }, array());    
+    }
+    public function findExits() {
+        $map = $this->game['map'];
+        $y = 0;
+        return array_reduce($map, function ($exits, $row) {
+            foreach ($row as $x => $tile) {
+                if ($tile['type'] == 2) {
+                    $exits[] = ['x' => $x, 'y' => $y];
+                }
+            }
+            $y ++;
+            return $exits;
+        }, array());    
+    }
+
+    public function distance ($x1, $y1, $x2, $y2) {
+        $a = $x1 - $x2;
+        $b = $y1 - $y2;
+    
+        return sqrt ($a * $a + $b * $b);
+    }
+
+    public function getClosestExit()
+    {
+        $exits = $this->findExits();
+
+        $distances = array();
+
+        foreach ($exits as $exit) {
+            $distance = $this->distance($this->game['players']['bearer']['position']['x'], $this->game['players']['bearer']['position']['y'], $exit['x'], $exit['y']);
+
+            $distances[] = $distance;
         }
         
-      }
+        $distances = usort($distances, function ($a, $b) {
+            return $a['distance'] - $b['distance'];
+        });
+
+        return $distances[0]['exit'] ?? null;
+    }
+
+    public function findSpecialAgent ($type) {
+        foreach ($this->game['special_agents'] as $agent) {
+            if ($agent['type'] == $type) {
+                return $agent;
+            }
+        }
+
+        return null;
+    }
 
     public function play(): void
     {
