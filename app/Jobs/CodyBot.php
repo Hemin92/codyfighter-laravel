@@ -426,17 +426,17 @@ class CodyBot implements ShouldQueue
             $player = $this->game['players']['bearer']['name'];
             $opponent = $this->game['players']['opponent']['name'];
             $verdict = 'draw';
-            switch ($this->game['verdict'])
+            switch ($this->game['verdict']['winner'])
             {
                 case $opponent:
-                    $verdict = 'lost';
+                    $verdict = $opponent;
                     break;
                 case $player: 
-                    $verdict = 'win';
+                    $verdict = $player;
                     break;
             };
 
-            error_log("CBot_0 {$player} game ended! {$verdict}");
+            error_log("CBot_0 {$player} game ended! winner: {$verdict}");
         }
     }
 
