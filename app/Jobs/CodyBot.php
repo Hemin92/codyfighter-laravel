@@ -121,7 +121,7 @@ class CodyBot implements ShouldQueue
                 $this->play();
                 sleep(60);
             } catch (Exception $e) {
-                
+                error_log($e);
             }
         }
     }
