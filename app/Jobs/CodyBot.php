@@ -143,6 +143,12 @@ class CodyBot implements ShouldQueue
                     break;
               
             }
+
+            $target = $bestTarget;
+
+            if ($target == null) continue;
+
+            if ()
         }
     }
 
